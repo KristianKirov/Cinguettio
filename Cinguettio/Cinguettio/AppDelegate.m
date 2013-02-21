@@ -1,0 +1,271 @@
+//
+//  AppDelegate.m
+//  Cinguettio
+//
+//  Created by Gabriela Zagarova on 12/16/12.
+//  Copyright (c) 2012 FMI. All rights reserved.
+//
+
+#import "AppDelegate.h"
+
+
+@implementation AppDelegate
+
+@synthesize managedObjectContext = _managedObjectContext;
+@synthesize managedObjectModel = _managedObjectModel;
+@synthesize persistentStoreCoordinator = _persistentStoreCoordinator;
+@synthesize userID;
+@synthesize locationManager;
+@synthesize showAllUsersOnMap;
+@synthesize loadImages;
+@synthesize loadItemsPerRequest;
+
+- (BOOL)application:(UIApplication *)application didFinishLaunchingWithOptions:(NSDictionary *)launchOptions
+{
+    NSUserDefaults *userSettings = [NSUserDefaults standardUserDefaults];
+	NSString* itemsPerRequest = [userSettings stringForKey:@"items_per_request_preference"];
+	if(!itemsPerRequest) {
+		// If the default value doesn't exist then we need to manually set them.
+		[self registerDefaultsFromSettingsBundle];
+    }
+    [self loadAppSettingsFrom:userSettings];
+    
+    self.window = [[UIWindow alloc] initWithFrame:[[UIScreen mainScreen] bounds]];
+    // Override point for customization after application launch.
+    
+    UIViewController *profileController = [[ProfileController alloc] initWithNibName:@"ProfileController" bundle:nil];
+    UINavigationController *profileNavigationController = [[UINavigationController alloc]initWithRootViewController:profileController];
+    
+    UIViewController *newPostController = [[NewPostController alloc] initWithNibName:@"NewPostController" bundle:nil];
+    UINavigationController *newPostsNavigationController = [[UINavigationController alloc]initWithRootViewController:newPostController];
+    
+    UIViewController *lastPostsController = [[LastPostsController alloc] initWithNibName:@"LastPostsController" bundle:nil];
+    UINavigationController *lastPostsNavigationController = [[UINavigationController alloc]initWithRootViewController:lastPostsController];
+    
+    UIViewController *friendsController = [[FriendsController alloc] initWithNibName:@"FriendsController" bundle:nil];
+    UINavigationController *friendsNavigationController = [[UINavigationController alloc]initWithRootViewController:friendsController];
+    
+    UIViewController *mapController = [[MapController alloc] initWithNibName:@"MapController" bundle:nil];
+    UINavigationController *mapNavigationController = [[UINavigationController alloc]initWithRootViewController:mapController];
+    self.tabBarController = [[UITabBarController alloc] init];
+
+    
+    //style navigation bar
+    [self.window setBackgroundColor:[UIColor colorWithPatternImage:[UIImage imageNamed:@"background.png"]]];
+    [newPostsNavigationController.navigationBar setBarStyle:UIBarStyleBlack];
+    [lastPostsNavigationController.navigationBar setBarStyle:UIBarStyleBlack];
+    [profileNavigationController.navigationBar setBarStyle:UIBarStyleBlack];
+    [friendsNavigationController.navigationBar setBarStyle:UIBarStyleBlack];
+    [mapNavigationController.navigationBar setBarStyle:UIBarStyleBlack];
+    
+    self.tabBarController.viewControllers = @[ lastPostsNavigationController, profileNavigationController, newPostsNavigationController, friendsNavigationController, mapNavigationController];
+    LoginViewController *loginViewController = [[LoginViewController alloc] initWithNibName:@"LoginViewController" bundle:nil];
+    loginViewController.delegate = self;
+    loginViewController.title = @"Login";
+    UINavigationController* navigationController = [[UINavigationController alloc] initWithRootViewController:loginViewController];
+    [navigationController.navigationBar setBarStyle:UIBarStyleBlack];
+    [self.window addSubview:navigationController.view];
+    //[self.tabBarController presentModalViewController:loginViewController animated:YES];
+    //self.window.rootViewController = self.tabBarController;
+    
+    self.window.rootViewController = navigationController;
+    
+    [self.window makeKeyAndVisible];
+    return YES;
+}
+
+- (void)loadAppSettingsFrom:(NSUserDefaults*)userSettings
+{
+    self.loadItemsPerRequest = [userSettings integerForKey:@"items_per_request_preference"];
+    self.loadImages = [userSettings boolForKey:@"load_images_preference"];
+    self.showAllUsersOnMap = [userSettings boolForKey:@"show_all_users_on_map_preference"];
+}
+
+- (void)registerDefaultsFromSettingsBundle {
+    NSString *settingsBundle = [[NSBundle mainBundle] pathForResource:@"Settings" ofType:@"bundle"];
+    if(!settingsBundle) {
+        NSLog(@"Could not find Settings.bundle");
+        return;
+    }
+    
+    NSDictionary *settings = [NSDictionary dictionaryWithContentsOfFile:[settingsBundle stringByAppendingPathComponent:@"Root.plist"]];
+    NSArray *preferences = [settings objectForKey:@"PreferenceSpecifiers"];
+    
+    NSMutableDictionary *defaultsToRegister = [[NSMutableDictionary alloc] initWithCapacity:[preferences count]];
+    for(NSDictionary *prefSpecification in preferences) {
+        NSString *key = [prefSpecification objectForKey:@"Key"];
+        if(key) {
+            [defaultsToRegister setObject:[prefSpecification objectForKey:@"DefaultValue"] forKey:key];
+        }
+    }
+    [[NSUserDefaults standardUserDefaults] registerDefaults:defaultsToRegister];
+}
+
+-(void)UserAuthenticationSucceeded:(UserModel *)user
+{
+    self.userID = [user.userId integerValue];
+    [self.window.rootViewController.view removeFromSuperview];
+    //TODO: bug location message is not shown!
+    [self.window addSubview:self.tabBarController.view];
+    
+    if ([CLLocationManager locationServicesEnabled])
+    {
+        locationManager = [[CLLocationManager alloc] init];
+        
+        locationManager.delegate = self;
+        locationManager.distanceFilter= 300;
+        locationManager.desiredAccuracy = kCLLocationAccuracyHundredMeters;
+        [locationManager startUpdatingLocation];
+    }
+}
+
+- (void)locationManager:(CLLocationManager *)manager didUpdateLocations:(NSArray *)locations
+{
+    CLLocation* newLocation = [locations lastObject];
+    
+    ServiceClient* client = [[ServiceClient alloc] init];
+    [client updateUserPosition:userID withLatitude:newLocation.coordinate.latitude withLongitude:newLocation.coordinate.longitude];
+}
+
+- (void)applicationWillResignActive:(UIApplication *)application
+{
+    // Sent when the application is about to move from active to inactive state. This can occur for certain types of temporary interruptions (such as an incoming phone call or SMS message) or when the user quits the application and it begins the transition to the background state.
+    // Use this method to pause ongoing tasks, disable timers, and throttle down OpenGL ES frame rates. Games should use this method to pause the game.
+}
+
+- (void)applicationDidEnterBackground:(UIApplication *)application
+{
+    // Use this method to release shared resources, save user data, invalidate timers, and store enough application state information to restore your application to its current state in case it is terminated later. 
+    // If your application supports background execution, this method is called instead of applicationWillTerminate: when the user quits.
+}
+
+- (void)applicationWillEnterForeground:(UIApplication *)application
+{
+    // Called as part of the transition from the background to the inactive state; here you can undo many of the changes made on entering the background.
+}
+
+- (void)applicationDidBecomeActive:(UIApplication *)application
+{
+    // Restart any tasks that were paused (or not yet started) while the application was inactive. If the application was previously in the background, optionally refresh the user interface.
+}
+
+- (void)applicationWillTerminate:(UIApplication *)application
+{
+    // Called when the application is about to terminate. Save data if appropriate. See also applicationDidEnterBackground:.
+}
+
+/*
+// Optional UITabBarControllerDelegate method.
+- (void)tabBarController:(UITabBarController *)tabBarController didSelectViewController:(UIViewController *)viewController
+{
+}
+*/
+
+/*
+// Optional UITabBarControllerDelegate method.
+- (void)tabBarController:(UITabBarController *)tabBarController didEndCustomizingViewControllers:(NSArray *)viewControllers changed:(BOOL)changed
+{
+}
+*/
+
+- (void)saveContext
+{
+    NSError *error = nil;
+    NSManagedObjectContext *managedObjectContext = self.managedObjectContext;
+    if (managedObjectContext != nil) {
+        if ([managedObjectContext hasChanges] && ![managedObjectContext save:&error]) {
+            // Replace this implementation with code to handle the error appropriately.
+            // abort() causes the application to generate a crash log and terminate. You should not use this function in a shipping application, although it may be useful during development.
+            NSLog(@"Unresolved error %@, %@", error, [error userInfo]);
+            abort();
+        }
+    }
+}
+
+#pragma mark - Core Data stack
+
+// Returns the managed object context for the application.
+// If the context doesn't already exist, it is created and bound to the persistent store coordinator for the application.
+- (NSManagedObjectContext *)managedObjectContext
+{
+    if (_managedObjectContext != nil) {
+        return _managedObjectContext;
+    }
+    
+    NSPersistentStoreCoordinator *coordinator = [self persistentStoreCoordinator];
+    if (coordinator != nil) {
+        _managedObjectContext = [[NSManagedObjectContext alloc] init];
+        [_managedObjectContext setPersistentStoreCoordinator:coordinator];
+    }
+    return _managedObjectContext;
+}
+
+// Returns the managed object model for the application.
+// If the model doesn't already exist, it is created from the application's model.
+- (NSManagedObjectModel *)managedObjectModel
+{
+    if (_managedObjectModel != nil) {
+        return _managedObjectModel;
+    }
+    NSURL *modelURL = [[NSBundle mainBundle] URLForResource:@"CinguettioDataModel" withExtension:@"momd"];
+    _managedObjectModel = [[NSManagedObjectModel alloc] initWithContentsOfURL:modelURL];
+    return _managedObjectModel;
+}
+
+// Returns the persistent store coordinator for the application.
+// If the coordinator doesn't already exist, it is created and the application's store added to it.
+- (NSPersistentStoreCoordinator *)persistentStoreCoordinator
+{
+    if (_persistentStoreCoordinator != nil) {
+        return _persistentStoreCoordinator;
+    }
+    
+    NSURL *storeURL = [[self applicationDocumentsDirectory] URLByAppendingPathComponent:@"CinguettioDataModel.sqlite"];
+    
+    //[[NSFileManager defaultManager] removeItemAtURL:storeURL error:nil];
+    
+    NSError *error = nil;
+    _persistentStoreCoordinator = [[NSPersistentStoreCoordinator alloc] initWithManagedObjectModel:[self managedObjectModel]];
+    
+    
+    if (![_persistentStoreCoordinator addPersistentStoreWithType:NSSQLiteStoreType configuration:nil URL:storeURL options:nil error:&error]) {
+        /*
+         Replace this implementation with code to handle the error appropriately.
+         
+         abort() causes the application to generate a crash log and terminate. You should not use this function in a shipping application, although it may be useful during development.
+         
+         Typical reasons for an error here include:
+         * The persistent store is not accessible;
+         * The schema for the persistent store is incompatible with current managed object model.
+         Check the error message to determine what the actual problem was.
+         
+         
+         If the persistent store is not accessible, there is typically something wrong with the file path. Often, a file URL is pointing into the application's resources directory instead of a writeable directory.
+         
+         If you encounter schema incompatibility errors during development, you can reduce their frequency by:
+         * Simply deleting the existing store:
+         [[NSFileManager defaultManager] removeItemAtURL:storeURL error:nil]
+         
+         * Performing automatic lightweight migration by passing the following dictionary as the options parameter:
+         @{NSMigratePersistentStoresAutomaticallyOption:@YES, NSInferMappingModelAutomaticallyOption:@YES}
+         
+         Lightweight migration will only work for a limited set of schema changes; consult "Core Data Model Versioning and Data Migration Programming Guide" for details.
+         
+         */
+        NSLog(@"Unresolved error %@, %@", error, [error userInfo]);
+        abort();
+    }
+    
+    return _persistentStoreCoordinator;
+}
+
+#pragma mark - Application's Documents directory
+
+// Returns the URL to the application's Documents directory.
+- (NSURL *)applicationDocumentsDirectory{
+    
+    return [[[NSFileManager defaultManager] URLsForDirectory:NSDocumentDirectory inDomains:NSUserDomainMask] lastObject];
+}
+
+
+@end
